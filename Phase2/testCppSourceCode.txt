@@ -1,0 +1,221 @@
+#include <sstream>
+#include <queue>
+#include <vector>
+#include <map>
+#include <fstream>
+#include <iostream>
+#include "HuffmanCoder.h"
+#include "HuffmanTreeNode.h"
+#include "BinaryIO.h"
+using namespace std;
+
+
+void HuffmanCoder::encoder(std::string input_file, std::string output_file) {
+	//open and check
+	ifstream infile(input_file);
+	if (!infile.is_open())
+		throw runtime_error("Unable to open file " + input_file);
+	//count character frequencies. frequecies are stored into 
+	//this.freqsCountsMap
+	count_freqs(infile);
+	infile.close();
+	//Build the Huffman Tree
+	HuffmanTreeNode* root = buildTree();
+
+	//Get the bitString for each character
+	//the bitString are stored into codeMap
+	generateCodeMap(root);
+	
+	bool check = (codeMap.size() == freqsCountsMap.size());
+
+	//encode all the characters of the file
+	infile.open(input_file);
+	char c = 0;
+	string bitString = "";
+	BinaryIO bio;
+	while (!infile.fail()) {
+		infile.get(c);
+		if (infile.fail())
+			continue;
+		bitString += this->codeMap[c];
+	}
+	string strTree=serialize_tree(root);
+	bio.writeFile(output_file, strTree, bitString);
+	infile.close();
+	//free the heap memory
+	freeTreeMemory(root);
+	cout << "Success! Encoded given text using " << bitString.size() << " bits.";
+}
+
+std::string HuffmanCoder:: serialize_tree(HuffmanTreeNode* root) {
+	//root should not NULL here!
+	if (root == NULL) {
+		return "";
+	}
+	//example:  "IIILaLbILeLfILcLd";
+	if (root->isLeaf()) {
+		string ret = "L";
+		ret.append(1, root->get_val());
+		//"Lc"
+		return ret;
+	}
+	else {
+		HuffmanTreeNode* left = root->get_left();
+		HuffmanTreeNode* right = root->get_right();
+		return "I" + serialize_tree(left) + serialize_tree(right);
+	}
+}
+void HuffmanCoder::count_freqs(std::istream& text) {
+	char c;
+	//count the frequency of each character
+	while (!text.fail()) {
+		text.get(c);
+		if (text.fail())
+			continue;
+		this->freqsCountsMap[c]++;
+	}
+
+}
+
+HuffmanTreeNode * HuffmanCoder::buildTree() {
+	priority_queue <HuffmanTreeNode*, vector < HuffmanTreeNode* >,
+		NodeComparator > my_pq;
+	//push all the node into pq
+	for (map<char, int>::iterator it = this->freqsCountsMap.begin();
+		it != this->freqsCountsMap.end(); ++it) {
+		char val = it->first;
+		int freq = it->second;
+		HuffmanTreeNode* n = new HuffmanTreeNode(val, freq, NULL, NULL);
+		my_pq.push(n);
+	}
+	if (my_pq.empty())
+		return NULL;
+	//build
+	while(my_pq.size()>1){
+		HuffmanTreeNode* left = my_pq.top();
+		my_pq.pop();
+		HuffmanTreeNode* right = my_pq.top();
+		my_pq.pop();
+		int parentFreq = left->get_freq() + right->get_freq();
+		HuffmanTreeNode* parent = new HuffmanTreeNode(0, parentFreq, left, right);
+		my_pq.push(parent);
+	}
+	//my_pq.size()==1 then:
+	HuffmanTreeNode* root = my_pq.top();
+	my_pq.pop();
+	return root;
+}
+
+void HuffmanCoder::generateCodeMap(HuffmanTreeNode * root) {
+	if (root == NULL)
+		return;
+	//specail case, only a leaf node is the root node 
+	if (root->isLeaf()) {
+		this->codeMap[root->get_val()] = "0";
+		return;
+	}
+	generateCodeMapHelper(root,"");
+}
+void HuffmanCoder::generateCodeMapHelper(HuffmanTreeNode* root, std::string prefix) {
+	if (root == NULL) {
+		return;
+	}
+	if (root->isLeaf()) {
+		this->codeMap[root->get_val()] = prefix;
+	}
+	else {
+		generateCodeMapHelper(root->get_left(), prefix + "0");
+		generateCodeMapHelper(root->get_right(), prefix + "1");
+	}
+}
+void HuffmanCoder::decoder(std::string input_file, std::string output_file) {
+	ifstream infile(input_file);
+	if (!infile.is_open())
+		throw runtime_error("Unable to open file " + input_file);
+	infile.close();
+	BinaryIO bio;
+	vector<string> result=bio.readFile(input_file);
+	string strTree = result[0];
+	string bitString = result[1];
+	HuffmanTreeNode * root= deserialize_tree(strTree);
+
+	//decoding:
+	string text = "";
+	istringstream iss(bitString);
+	char c;
+	HuffmanTreeNode* presentNode = root;
+	//if root is leaf
+	while (!iss.fail()) {
+		if (presentNode == NULL)
+			break;
+		iss.get(c);
+		if (iss.fail())
+			continue;
+		if (root->isLeaf()) {
+			text.append(1, root->get_val());
+			continue;
+		}
+		else {
+			if (c == '0') {
+				presentNode = presentNode->get_left();
+			}
+			else {
+				presentNode = presentNode->get_right();
+			}
+			if (presentNode->isLeaf()) {
+				text.append(1, presentNode->get_val());
+				presentNode = root;
+			}
+		}
+
+	}
+	if (presentNode != root)
+		throw runtime_error("Encoding did not match Huffman tree.");
+	ofstream outfile(output_file);
+	outfile << text;
+	outfile.close();
+	freeTreeMemory(root);
+}
+HuffmanTreeNode* HuffmanCoder::deserialize_tree_helper(std::string& serial_tree) {
+	//example:  "IIILaLbILeLfILcLd";
+	if (serial_tree.empty())
+		return NULL;
+	//get present first char and pop it
+	char c = serial_tree[0];
+	serial_tree.erase(0, 1);
+
+	if (c == 'I') {
+		HuffmanTreeNode* p = new HuffmanTreeNode(0, 0, NULL, NULL);
+		HuffmanTreeNode* left = deserialize_tree_helper(serial_tree);
+		HuffmanTreeNode* right = deserialize_tree_helper(serial_tree);
+		p->set_left(left);
+		p->set_right(right);
+		return p;
+	}
+	else if (c == 'L') {
+		//get the leaf val
+		if (serial_tree.empty())
+			throw runtime_error("Wrong Haffman String Tree");
+		char val = serial_tree[0];
+		serial_tree.erase(0, 1);
+		return new HuffmanTreeNode(val, 0, NULL, NULL);
+	}
+	else {
+		throw runtime_error("Wrong Haffman String Tree");
+	}
+}
+
+HuffmanTreeNode* HuffmanCoder::deserialize_tree(std::string serial_tree) {
+	if (serial_tree.empty())
+		return NULL;
+	string serial_tree_bak = serial_tree;
+	return deserialize_tree_helper(serial_tree_bak);
+}
+
+void HuffmanCoder::freeTreeMemory(HuffmanTreeNode* root) {
+	if (root == NULL)
+		return;
+	freeTreeMemory(root->get_left());
+	freeTreeMemory(root->get_right());
+	delete root;
+}
